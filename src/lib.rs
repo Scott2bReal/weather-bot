@@ -1,3 +1,5 @@
+mod weather;
+
 use anyhow::anyhow;
 use serenity::model::gateway::Ready;
 use serenity::model::prelude::interaction::{Interaction, InteractionResponseType};
