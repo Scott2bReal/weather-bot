@@ -1,13 +1,15 @@
 mod weather;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context as _;
 use serenity::model::gateway::Ready;
+use serenity::model::prelude::command::CommandOptionType;
 use serenity::model::prelude::interaction::{Interaction, InteractionResponseType};
 use serenity::prelude::*;
 use serenity::{async_trait, model::prelude::GuildId};
 use shuttle_secrets::SecretStore;
 use tracing::info;
 
+const OPTIONS_PLACE: &str = "place";
 struct Bot {
     weather_api_key: String,
     client: reqwest::Client,
@@ -22,9 +24,24 @@ impl EventHandler for Bot {
         let guild_id = GuildId(628079435832098827);
 
         let commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
-            commands.create_application_command(|command| {
-                command.name("hello").description("say hello")
-            })
+            commands
+                // Basic hello command
+                .create_application_command(|command| {
+                    command.name("hello").description("say hello")
+                })
+                // Command to look up weather
+                .create_application_command(|command| {
+                    command
+                        .name("weather")
+                        .description("Display the weather")
+                        .create_option(|option| {
+                            option
+                                .name("place")
+                                .description("City to look up")
+                                .kind(CommandOptionType::String)
+                                .required(true)
+                        })
+                })
         })
         .await
         .unwrap();
@@ -36,6 +53,29 @@ impl EventHandler for Bot {
         if let Interaction::ApplicationCommand(command) = interaction {
             let response_content = match command.data.name.as_str() {
                 "hello" => "hello".to_owned(),
+                "weather" => {
+                    let argument = command
+                        .data
+                        .options
+                        .iter()
+                        .find(|opt| opt.name == OPTIONS_PLACE)
+                        .cloned();
+
+                    let value = argument.unwrap().value.unwrap();
+                    let place = value.as_str().unwrap();
+                    let result = weather::get_forecast(place, &self.weather_api_key, &self.client).await;
+                    info!("{:?}", result);
+
+                    match result {
+                        Ok((location, forecast)) => {
+                            info!("{:?}", &forecast);
+                            format!("Forecast: {} in {}", forecast.headline.overview, location)
+                        }
+                        Err(err) => {
+                            format!("Err: {}", err)
+                        }
+                    }
+                }
                 command => unreachable!("Unknown command: {}", command),
             };
 
@@ -77,7 +117,7 @@ async fn serenity(
         .event_handler(Bot {
             weather_api_key,
             client: reqwest::Client::new(),
-            discord_guild_id: GuildId(discord_guild_id),
+            discord_guild_id: GuildId(discord_guild_id.parse().unwrap()),
         })
         .await
         .expect("Err creating client");
