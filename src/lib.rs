@@ -1,6 +1,6 @@
 mod weather;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use serenity::model::gateway::Ready;
 use serenity::model::prelude::interaction::{Interaction, InteractionResponseType};
 use serenity::prelude::*;
@@ -8,7 +8,11 @@ use serenity::{async_trait, model::prelude::GuildId};
 use shuttle_secrets::SecretStore;
 use tracing::info;
 
-struct Bot;
+struct Bot {
+    weather_api_key: String,
+    client: reqwest::Client,
+    discord_guild_id: GuildId,
+}
 
 #[async_trait]
 impl EventHandler for Bot {
@@ -54,17 +58,27 @@ async fn serenity(
     #[shuttle_secrets::Secrets] secret_store: SecretStore,
 ) -> shuttle_service::ShuttleSerenity {
     // Get the discord token set in `Secrets.toml`
-    let token = if let Some(token) = secret_store.get("DISCORD_TOKEN") {
-        token
-    } else {
-        return Err(anyhow!("'DISCORD_TOKEN' was not found").into());
-    };
+    let token = secret_store
+        .get("DISCORD_TOKEN")
+        .context("'DISCORD_TOKEN' was not found")?;
+
+    let weather_api_key = secret_store
+        .get("WEATHER_API_KEY")
+        .context("'WEATHER_API_KEY' was not found")?;
+
+    let discord_guild_id = secret_store
+        .get("DISCORD_GUILD_ID")
+        .context("'DISCORD_GUILD_ID' was not found")?;
 
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
     let client = Client::builder(&token, intents)
-        .event_handler(Bot)
+        .event_handler(Bot {
+            weather_api_key,
+            client: reqwest::Client::new(),
+            discord_guild_id: GuildId(discord_guild_id),
+        })
         .await
         .expect("Err creating client");
 
